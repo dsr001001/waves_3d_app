@@ -32,6 +32,7 @@ class MainActivity : Activity(), SensorEventListener {
             javaScriptEnabled = true
             domStorageEnabled = true
             allowFileAccess = true
+            mediaPlaybackRequiresUserGesture = false
         }
 
         webView.webViewClient = WebViewClient()

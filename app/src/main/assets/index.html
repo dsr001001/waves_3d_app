@@ -29,13 +29,13 @@
         const boxMaterial = new THREE.MeshPhongMaterial({ color: 0x555555, side: THREE.BackSide });
         const box = new THREE.Mesh(boxGeometry, boxMaterial);
         box.position.y = 5; 
-        tiltGroup.add(box);
+        scene.add(box); // Fixed to scene
 
         const rimGeo = new THREE.BoxGeometry(21, 10.5, 21);
         const rimMat = new THREE.MeshBasicMaterial({ color: 0x333333, wireframe: true });
         const rim = new THREE.Mesh(rimGeo, rimMat);
         rim.position.y = 5;
-        tiltGroup.add(rim);
+        scene.add(rim); // Fixed to scene
 
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
@@ -59,7 +59,7 @@
 
         const water = new THREE.Mesh(waterGeo, waterMat);
         water.position.y = 5;
-        tiltGroup.add(water);
+        scene.add(water); // Water is also in scene, physics handles movement
 
         const h = new Float32Array(gridSize * gridSize);
         const v = new Float32Array(gridSize * gridSize);
@@ -69,7 +69,43 @@
         let smoothedTiltX = 0;
         let smoothedTiltY = 0;
 
+        // Audio Setup
+        let audioCtx;
+        let noiseNode;
+        let filterNode;
+        let gainNode;
+
+        function initAudio() {
+            if (audioCtx) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            
+            const bufferSize = 2 * audioCtx.sampleRate;
+            const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+            const output = buffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                output[i] = Math.random() * 2 - 1;
+            }
+
+            noiseNode = audioCtx.createBufferSource();
+            noiseNode.buffer = buffer;
+            noiseNode.loop = true;
+
+            filterNode = audioCtx.createBiquadFilter();
+            filterNode.type = 'lowpass';
+            filterNode.frequency.value = 1000;
+            filterNode.Q.value = 1;
+
+            gainNode = audioCtx.createGain();
+            gainNode.gain.value = 0;
+
+            noiseNode.connect(filterNode);
+            filterNode.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            noiseNode.start();
+        }
+
         window.updateGyro = function(pitch, roll) {
+            if (!audioCtx) initAudio();
             targetTiltX = roll; 
             targetTiltY = -pitch; 
         };
@@ -84,6 +120,7 @@
             smoothedTiltY += (targetTiltY - smoothedTiltY) * 0.1;
 
             const h_old = new Float32Array(h);
+            let totalVelocity = 0;
             
             for (let i = 0; i < gridSize; i++) {
                 for (let j = 0; j < gridSize; j++) {
@@ -109,6 +146,7 @@
 
                     v[idx] += accel * dt;
                     v[idx] *= damping;
+                    totalVelocity += Math.abs(v[idx]);
                 }
             }
 
@@ -122,9 +160,13 @@
             }
             waterGeo.attributes.position.needsUpdate = true;
             waterGeo.computeVertexNormals();
-            
-            tiltGroup.rotation.x = -smoothedTiltY;
-            tiltGroup.rotation.z = smoothedTiltX;
+
+            // Update Audio based on movement
+            if (gainNode) {
+                const intensity = Math.min(totalVelocity / 500, 1.0);
+                gainNode.gain.setTargetAtTime(intensity * 0.3, audioCtx.currentTime, 0.1);
+                filterNode.frequency.setTargetAtTime(400 + intensity * 1200, audioCtx.currentTime, 0.1);
+            }
         }
 
         v[(gridSize/2)*gridSize + gridSize/2] = 20;
