@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Waves</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #222; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 15, 25);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        const tiltGroup = new THREE.Group();
+        scene.add(tiltGroup);
+
+        const boxGeometry = new THREE.BoxGeometry(20, 10, 20);
+        const boxMaterial = new THREE.MeshPhongMaterial({ color: 0x555555, side: THREE.BackSide });
+        const box = new THREE.Mesh(boxGeometry, boxMaterial);
+        box.position.y = 5; 
+        tiltGroup.add(box);
+
+        const rimGeo = new THREE.BoxGeometry(21, 10.5, 21);
+        const rimMat = new THREE.MeshBasicMaterial({ color: 0x333333, wireframe: true });
+        const rim = new THREE.Mesh(rimGeo, rimMat);
+        rim.position.y = 5;
+        tiltGroup.add(rim);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(10, 20, 10);
+        scene.add(dirLight);
+
+        const gridSize = 40;
+        const size = 20;
+        const waterGeo = new THREE.PlaneGeometry(size, size, gridSize - 1, gridSize - 1);
+        waterGeo.rotateX(-Math.PI / 2);
+
+        const waterMat = new THREE.MeshPhongMaterial({
+            color: 0x00aaff,
+            shininess: 100,
+            transparent: true,
+            opacity: 0.8,
+            side: THREE.DoubleSide,
+            flatShading: true
+        });
+
+        const water = new THREE.Mesh(waterGeo, waterMat);
+        water.position.y = 5;
+        tiltGroup.add(water);
+
+        const h = new Float32Array(gridSize * gridSize);
+        const v = new Float32Array(gridSize * gridSize);
+        
+        let targetTiltX = 0;
+        let targetTiltY = 0;
+        let smoothedTiltX = 0;
+        let smoothedTiltY = 0;
+
+        window.updateGyro = function(pitch, roll) {
+            targetTiltX = roll; 
+            targetTiltY = -pitch; 
+        };
+
+        const dt = 0.016; 
+        const c2 = 250.0; 
+        const damping = 0.985; 
+        const springK = 15.0; 
+
+        function updatePhysics() {
+            smoothedTiltX += (targetTiltX - smoothedTiltX) * 0.1;
+            smoothedTiltY += (targetTiltY - smoothedTiltY) * 0.1;
+
+            const h_old = new Float32Array(h);
+            
+            for (let i = 0; i < gridSize; i++) {
+                for (let j = 0; j < gridSize; j++) {
+                    const idx = i * gridSize + j;
+                    
+                    const px = (i / (gridSize - 1) - 0.5) * size;
+                    const pz = (j / (gridSize - 1) - 0.5) * size;
+                    
+                    const eq_h = (px * smoothedTiltX + pz * smoothedTiltY) * 2.5;
+
+                    let force = 0;
+                    let neighbors = 0;
+
+                    if (i > 0) { force += h_old[idx - gridSize]; neighbors++; }
+                    if (i < gridSize - 1) { force += h_old[idx + gridSize]; neighbors++; }
+                    if (j > 0) { force += h_old[idx - 1]; neighbors++; }
+                    if (j < gridSize - 1) { force += h_old[idx + 1]; neighbors++; }
+
+                    force -= neighbors * h_old[idx];
+                    
+                    let accel = force * c2;
+                    accel += (eq_h - h_old[idx]) * springK;
+
+                    v[idx] += accel * dt;
+                    v[idx] *= damping;
+                }
+            }
+
+            for (let i = 0; i < gridSize * gridSize; i++) {
+                h[i] += v[i] * dt;
+            }
+
+            const positions = waterGeo.attributes.position.array;
+            for (let i = 0; i < h.length; i++) {
+                positions[i * 3 + 1] = h[i];
+            }
+            waterGeo.attributes.position.needsUpdate = true;
+            waterGeo.computeVertexNormals();
+            
+            tiltGroup.rotation.x = -smoothedTiltY;
+            tiltGroup.rotation.z = smoothedTiltX;
+        }
+
+        v[(gridSize/2)*gridSize + gridSize/2] = 20;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            updatePhysics();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
